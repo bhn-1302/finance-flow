@@ -5,7 +5,6 @@ import { ChatInput } from "./ChatInput";
 import { saveMessages, loadMessages } from "../lib/storage";
 import { v4 as uuidv4 } from "uuid";
 import TypingIndicator from "./TypingIndicator";
-import { geminiModel } from "../../../lib/gemini";
 import { systemPrompt } from "../../../lib/systemPrompt";
 import { useFinanceStore } from "../../../store/useFinanceStore";
 
@@ -40,6 +39,7 @@ export const ChatPage = () => {
     setIsTyping(true);
 
     try {
+      // 1. Monta o prompt completo (incluindo systemPrompt e transações)
       const prompt = `
 ${systemPrompt}
 
@@ -50,11 +50,24 @@ Pergunta do usuário:
 "${text}"
 `;
 
-      const result = await geminiModel.generateContent(prompt);
+      // 2. Realiza a chamada segura para a Netlify Function
+      const response = await fetch("/.netlify/functions/gemini-proxy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // Envia o prompt montado no corpo da requisição
+        body: JSON.stringify({ prompt: prompt }),
+      });
 
+      // Verifica se a resposta HTTP da função foi bem-sucedida
+      if (!response.ok) {
+        throw new Error(`Função Netlify retornou status: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      // A resposta da Netlify Function virá em 'data.text' (conforme o código proxy)
       const replyText =
-        result?.response?.text() ||
-        "Não consegui gerar uma resposta, tente novamente.";
+        data.text || "Não consegui gerar uma resposta, tente novamente.";
 
       addMessage({
         id: uuidv4(),
@@ -63,12 +76,12 @@ Pergunta do usuário:
         ts: Date.now(),
       });
     } catch (err) {
-      console.error("❌ ERRO DO GEMINI:", err);
+      console.error("❌ ERRO NO PROXY/GEMINI:", err);
 
       addMessage({
         id: uuidv4(),
         author: "bot",
-        text: "Desculpe, ocorreu um erro ao acessar a IA. Tente novamente.",
+        text: "Desculpe, ocorreu um erro ao acessar o Assistente (Proxy). Tente novamente.",
         ts: Date.now(),
       });
     }
